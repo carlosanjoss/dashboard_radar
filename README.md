@@ -78,7 +78,7 @@ Nenhuma credencial é exibida na interface.
 - As páginas carregam o banco completo por padrão.
 - A navegação lateral fica apenas para trocar de página.
 - A página de busca tem um campo próprio: vazio mostra a base paginada; preenchido pesquisa o termo.
-- A página de comentários e LLM tem filtro local por rede social.
+- A página de comentários analisados tem filtro local por plataforma.
 - As consultas seguem agregando e paginando no PostgreSQL.
 - Análises temporais ignoram datas futuras em relação ao dia atual.
 
@@ -91,8 +91,7 @@ Nenhuma credencial é exibida na interface.
 
 ## Páginas
 
-- Visão geral: métricas, ranking, qualidade, relatório e registros recentes.
-- Redes sociais: volume, prevalência, fontes, idioma e amostras pequenas.
+- Plataformas: volume, prevalência, fontes, idioma e comparação entre plataformas sociais e apps de mensagens.
 - Categorias: tipologias, categorias Gemma, coocorrência e probabilidades.
 - Temporal: evolução por mês, semana, dia ou ano.
 - Busca: consulta textual e tabela paginada.

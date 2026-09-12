@@ -9,6 +9,7 @@ from services.database import run_query
 
 
 MODEL_NAME = "gemma3:4b"
+DASHBOARD_MIN_DATE = date(2018, 1, 1)
 EXPECTED_PLATFORMS = [
     "facebook",
     "reddit",
@@ -21,11 +22,11 @@ EXPECTED_PLATFORMS = [
 
 HATE_TYPE_LABELS = {
     "ageism": "Etarismo",
-    "aporophobia": "Aporofobia",
-    "body_shame": "Ataque ao corpo",
+    "aporophobia": "Classismo",
+    "body_shame": "Gordofobia",
     "capacitism": "Capacitismo",
     "lgbtphobia": "LGBTfobia",
-    "misogyny": "Misoginia",
+    "misogyny": "Sexismo",
     "other": "Outros",
     "political": "Ódio político",
     "racism": "Racismo",
@@ -33,6 +34,24 @@ HATE_TYPE_LABELS = {
     "xenophobia": "Xenofobia",
 }
 EXCLUDED_HATE_TYPES = {"other"}
+
+CATEGORY_LABEL_REPLACEMENTS = {
+    **HATE_TYPE_LABELS,
+    "hostilidade política": "Ódio político",
+    "hostilidade politica": "Ódio político",
+    "Hostilidade política": "Ódio político",
+    "Hostilidade politica": "Ódio político",
+    "aporofobia": "Classismo",
+    "Aporofobia": "Classismo",
+    "discriminação corporal": "Gordofobia",
+    "discriminacao corporal": "Gordofobia",
+    "Discriminação corporal": "Gordofobia",
+    "Discriminacao corporal": "Gordofobia",
+    "misoginia": "Sexismo",
+    "Misoginia": "Sexismo",
+    "misoginia ": "Sexismo",
+    "Misoginia ": "Sexismo",
+}
 
 PLATFORM_LABELS = {
     "facebook": "Facebook",
@@ -44,14 +63,20 @@ PLATFORM_LABELS = {
     "youtube": "YouTube",
 }
 
+MESSAGING_PLATFORMS = {"telegram", "whatsapp"}
+PLATFORM_GROUP_LABELS = {
+    "social_network": "Plataformas sociais",
+    "instant_messaging": "Apps de mensagens",
+}
+
 CONTENT_KIND_LABELS = {
     "post": "Post",
     "comment": "Comentário",
 }
 
 PRED_LABELS = {
-    "hate": "Hate",
-    "nao_hate": "Não hate",
+    "hate": "Discurso de ódio",
+    "nao_hate": "Sem discurso de ódio",
 }
 
 
@@ -242,8 +267,16 @@ def _has_text_filter(filters=None):
 
 def _filtered_cte(filters=None, include_text=False, include_dates=False):
     include_text = include_text or _has_text_filter(filters)
-    include_dates = include_dates or include_text or _has_date_filter(filters)
+    include_dates = True
     where_sql, params = _where_sql(filters, "b")
+    params["dashboard_min_date"] = DASHBOARD_MIN_DATE
+    date_scope_clause = "(b.published_at IS NULL OR b.published_at::date >= :dashboard_min_date)"
+
+    if where_sql:
+        where_sql = f"{where_sql}\n  AND {date_scope_clause}"
+    else:
+        where_sql = f"WHERE {date_scope_clause}"
+
     query = f"""
     WITH base AS (
         {_base_sql(include_text=include_text, include_dates=include_dates)}
@@ -257,6 +290,33 @@ def _filtered_cte(filters=None, include_text=False, include_dates=False):
     return query, params
 
 
+def _platform_group(platform):
+    return "instant_messaging" if str(platform).lower() in MESSAGING_PLATFORMS else "social_network"
+
+
+def _label_category_value(value):
+    if value is None:
+        return value
+
+    text = str(value).strip()
+    if not text:
+        return text
+
+    parts = [
+        part.strip()
+        for part in text.split(";")
+        if part.strip() and part.strip().lower() not in EXCLUDED_HATE_TYPES
+    ]
+    if not parts:
+        return "sem tipo específico"
+
+    labels = [
+        CATEGORY_LABEL_REPLACEMENTS.get(part, CATEGORY_LABEL_REPLACEMENTS.get(part.lower(), part))
+        for part in parts
+    ]
+    return "; ".join(labels)
+
+
 def _add_labels(df):
     if "hate_types" in df.columns:
         def clean_hate_types(value):
@@ -265,9 +325,19 @@ def _add_labels(df):
             return value
 
         df["hate_types"] = df["hate_types"].apply(clean_hate_types)
+        df["hate_types_label"] = df["hate_types"].apply(
+            lambda value: [
+                HATE_TYPE_LABELS.get(item, item)
+                for item in value
+            ]
+            if isinstance(value, (list, tuple))
+            else value
+        )
 
     if "platform" in df.columns:
         df["platform_label"] = df["platform"].map(PLATFORM_LABELS).fillna(df["platform"])
+        df["platform_group"] = df["platform"].apply(_platform_group)
+        df["platform_group_label"] = df["platform_group"].map(PLATFORM_GROUP_LABELS)
 
     if "content_kind" in df.columns:
         df["content_kind_label"] = (
@@ -276,6 +346,12 @@ def _add_labels(df):
 
     if "pred_label" in df.columns:
         df["pred_label_label"] = df["pred_label"].map(PRED_LABELS).fillna(df["pred_label"])
+
+    if "pred_category" in df.columns:
+        df["pred_category_label"] = df["pred_category"].apply(_label_category_value)
+
+    if "pred_category_item" in df.columns:
+        df["pred_category_item_label"] = df["pred_category_item"].apply(_label_category_value)
 
     if "hate_type" in df.columns:
         df["hate_type_label"] = df["hate_type"].map(HATE_TYPE_LABELS).fillna(df["hate_type"])
@@ -344,10 +420,18 @@ def get_filter_options():
         SELECT DISTINCT hate_type
         FROM (
             SELECT unnest(COALESCE(hate_types, ARRAY[]::text[])) AS hate_type
-            FROM public.v_gemma_hate_results
-            WHERE model_name = :model_name
-              AND status = 'success'
-              AND pred_label = 'hate'
+            FROM public.v_gemma_hate_results r
+            LEFT JOIN public.posts p
+                ON r.source_post_id = p.id
+            LEFT JOIN public.comments c
+                ON r.source_comment_id = c.id
+            WHERE r.model_name = :model_name
+              AND r.status = 'success'
+              AND r.pred_label = 'hate'
+              AND (
+                  COALESCE(p.published_at, c.published_at) IS NULL
+                  OR COALESCE(p.published_at, c.published_at)::date >= :dashboard_min_date
+              )
         ) t
         WHERE hate_type IS NOT NULL
           AND hate_type <> 'other'
@@ -356,7 +440,10 @@ def get_filter_options():
     """
 
     try:
-        hate_types = run_query(hate_type_query, {"model_name": MODEL_NAME}).iloc[0]["hate_types"]
+        hate_types = run_query(
+            hate_type_query,
+            {"model_name": MODEL_NAME, "dashboard_min_date": DASHBOARD_MIN_DATE},
+        ).iloc[0]["hate_types"]
         if hate_types:
             options["hate_types"] = hate_types
     except Exception:
@@ -373,6 +460,7 @@ def get_filter_options():
         ON r.source_comment_id = c.id
     WHERE r.model_name = :model_name
       AND r.status = 'success'
+      AND COALESCE(p.published_at, c.published_at)::date >= :dashboard_min_date
       AND COALESCE(p.published_at, c.published_at)::date <= CURRENT_DATE
     """
 
@@ -383,12 +471,16 @@ def get_filter_options():
     FROM public.v_gemma_hate_results
     WHERE model_name = :model_name
       AND status = 'success'
+      AND analyzed_at::date >= :dashboard_min_date
       AND analyzed_at::date <= CURRENT_DATE
     """
 
     for query in (date_query, fallback_date_query):
         try:
-            dates = run_query(query, {"model_name": MODEL_NAME}).iloc[0].to_dict()
+            dates = run_query(
+                query,
+                {"model_name": MODEL_NAME, "dashboard_min_date": DASHBOARD_MIN_DATE},
+            ).iloc[0].to_dict()
             if dates.get("min_date") and dates.get("max_date"):
                 options["min_date"] = dates["min_date"]
                 options["max_date"] = dates["max_date"]
@@ -430,7 +522,7 @@ def get_overview_metrics(filters=None):
         MAX(published_at)::date AS max_date
     FROM filtered
     """
-    return run_query(query, params)
+    return _add_labels(run_query(query, params))
 
 
 def get_platform_analysis(filters=None):
@@ -681,7 +773,7 @@ def get_temporal_analysis(filters=None, grain="month"):
     GROUP BY period
     ORDER BY period
     """
-    return run_query(query, params)
+    return _add_labels(run_query(query, params))
 
 
 def get_temporal_type_trends(filters=None, grain="month", limit=6):
@@ -755,7 +847,7 @@ def get_quality_metrics(filters=None):
         (SELECT total_null_labels FROM errors)::bigint AS null_label_records
     FROM filtered
     """
-    return run_query(query, params)
+    return _add_labels(run_query(query, params))
 
 
 def get_low_sample_platforms(filters=None, threshold=1000):
@@ -909,16 +1001,30 @@ def get_hate_type_toxicity_timeseries(
         GROUP BY hate_type
         ORDER BY total DESC
         LIMIT :limit
+    ),
+    period_totals AS (
+        SELECT
+            period,
+            COUNT(*)::bigint AS period_total_mentions
+        FROM typed
+        GROUP BY period
     )
     SELECT
         t.period,
         t.hate_type,
         COUNT(*)::bigint AS total_mentions,
+        pt.period_total_mentions,
+        ROUND(
+            (100.0 * COUNT(*) / NULLIF(pt.period_total_mentions, 0))::numeric,
+            2
+        )::double precision AS percent_mentions,
         ROUND(AVG(t.hate_probability)::numeric, 4)::double precision AS avg_toxicity
     FROM typed t
     INNER JOIN top_types tt
         ON tt.hate_type = t.hate_type
-    GROUP BY t.period, t.hate_type
+    INNER JOIN period_totals pt
+        ON pt.period = t.period
+    GROUP BY t.period, t.hate_type, pt.period_total_mentions
     ORDER BY t.period, t.hate_type
     """
     return _add_labels(run_query(query, params))
@@ -953,17 +1059,26 @@ def get_hate_type_toxicity_summary(filters=None, year=None, month=None, limit=12
           AND cardinality(hate_types) > 0
           AND hate_type <> 'other'
           {date_clause}
+    ),
+    totals AS (
+        SELECT COUNT(*)::bigint AS total_mentions_all
+        FROM typed
     )
     SELECT
-        hate_type,
+        t.hate_type,
         COUNT(*)::bigint AS total_mentions,
-        COUNT(DISTINCT platform)::integer AS total_platforms,
-        COUNT(*) FILTER (WHERE content_kind = 'post')::bigint AS post_mentions,
-        COUNT(*) FILTER (WHERE content_kind = 'comment')::bigint AS comment_mentions,
-        ROUND(AVG(hate_probability)::numeric, 4)::double precision AS avg_toxicity
-    FROM typed
-    GROUP BY hate_type
-    ORDER BY avg_toxicity DESC NULLS LAST, total_mentions DESC
+        ROUND(
+            (100.0 * COUNT(*) / NULLIF(MAX(totals.total_mentions_all), 0))::numeric,
+            2
+        )::double precision AS percent_mentions,
+        COUNT(DISTINCT t.platform)::integer AS total_platforms,
+        COUNT(*) FILTER (WHERE t.content_kind = 'post')::bigint AS post_mentions,
+        COUNT(*) FILTER (WHERE t.content_kind = 'comment')::bigint AS comment_mentions,
+        ROUND(AVG(t.hate_probability)::numeric, 4)::double precision AS avg_toxicity
+    FROM typed t
+    CROSS JOIN totals
+    GROUP BY t.hate_type
+    ORDER BY total_mentions DESC, avg_toxicity DESC NULLS LAST
     LIMIT :limit
     """
     return _add_labels(run_query(query, params))
@@ -978,34 +1093,35 @@ def get_top_terms_sql(filters=None, limit=80, text_source="evidence"):
         else "text_content"
     )
     stopwords = [
-        "a", "ao", "aos", "as", "com", "como", "da", "das", "de", "do",
-        "dos", "e", "em", "era", "essa", "esse", "esta", "este", "eu",
-        "foi", "mais", "mas", "me", "muito", "na", "n?o", "nas", "no",
-        "nos", "o", "os", "ou", "para", "pela", "pelo", "por", "pra",
-        "pro", "que", "se", "sem", "ser", "sua", "s?o", "tem", "um",
-        "uma", "vai", "voc?", "voc?s", "ele", "ela", "eles", "elas",
-        "isso", "isto", "aquilo", "aqui", "ali", "l?", "todo", "toda",
-        "todos", "todas", "quem", "qual", "quais", "quando", "onde",
-        "porque", "porqu?", "assim", "ainda", "j?", "at?", "tamb?m",
-        "mesmo", "mesma", "mesmos", "mesmas", "meu", "minha", "meus",
-        "minhas", "seu", "seus", "dele", "dela", "deles", "delas",
-        "tudo", "nada", "cada", "sobre", "entre", "contra", "apenas",
-        "agora", "hoje", "dia", "cara", "tipo", "coisa", "gente",
-        "pessoa", "pessoas", "ter", "vou", "t?", "ta", "est?", "estava",
-        "estao", "est?o", "ser?", "bem", "pode", "podem", "podia",
-        "fazer", "faz", "fez", "feito", "nosso", "nossa", "nossos",
-        "nossas", "suas", "pois", "sim", "nem", "ent?o", "foram",
-        "vamos", "nunca", "tempo", "ano", "anos", "mundo", "phone",
-        "nao", "sao", "voce", "voces", "esta", "estao", "sera", "ate",
-        "tambem", "ja", "la", "ta", "entao",
-        "esses", "essas", "desse", "dessa", "desses", "dessas", "aquele",
-        "aquela", "aqueles", "aquelas", "falar", "fala", "falou", "quer",
-        "ver", "sempre", "kkkk", "kkkkk", "kkk", "rsrs",
-        "http", "https", "www", "com", "br", "net", "org", "html", "php",
-        "amp", "utm", "utm_source", "utm_medium", "utm_campaign", "ref",
-        "t", "co", "bit", "ly", "tinyurl", "youtu", "youtube", "facebook",
-        "instagram", "twitter", "reddit", "telegram", "tiktok", "whatsapp",
-    ]
+            "a", "ao", "aos", "as", "com", "como", "da", "das", "de", "do",
+            "dos", "e", "em", "era", "essa", "esse", "esta", "este", "eu",
+            "foi", "mais", "mas", "me", "muito", "na", "n?o", "nas", "no",
+            "nos", "o", "os", "ou", "para", "pela", "pelo", "por", "pra",
+            "pro", "que", "se", "sem", "ser", "sua", "s?o", "tem", "um",
+            "uma", "vai", "voc?", "voc?s", "ele", "ela", "eles", "elas",
+            "isso", "isto", "aquilo", "aqui", "ali", "l?", "todo", "toda",
+            "todos", "todas", "quem", "qual", "quais", "quando", "onde",
+            "porque", "porqu?", "assim", "ainda", "j?", "at?", "tamb?m",
+            "mesmo", "mesma", "mesmos", "mesmas", "meu", "minha", "meus",
+            "minhas", "seu", "seus", "dele", "dela", "deles", "delas",
+            "tudo", "nada", "cada", "sobre", "entre", "contra", "apenas",
+            "agora", "hoje", "dia", "cara", "tipo", "coisa", "gente",
+            "pessoa", "pessoas", "ter", "vou", "t?", "ta", "est?", "estava",
+            "estao", "est?o", "ser?", "bem", "pode", "podem", "podia",
+            "fazer", "faz", "fez", "feito", "nosso", "nossa", "nossos",
+            "nossas", "suas", "pois", "sim", "nem", "ent?o", "foram",
+            "vamos", "nunca", "tempo", "ano", "anos", "mundo", "phone",
+            "nao", "sao", "voce", "voces", "esta", "estao", "sera", "ate",
+            "tambem", "ja", "la", "ta", "entao",
+            "esses", "essas", "desse", "dessa", "desses", "dessas", "aquele",
+            "aquela", "aqueles", "aquelas", "falar", "fala", "falou", "quer",
+            "ver", "sempre", "kkkk", "kkkkk", "kkk", "rsrs",
+            "http", "https", "www", "com", "br", "net", "org", "html", "php",
+            "amp", "utm", "utm_source", "utm_medium", "utm_campaign", "ref",
+            "t", "co", "bit", "ly", "tinyurl", "youtu", "youtube", "facebook",
+            "instagram", "twitter", "reddit", "telegram", "tiktok", "whatsapp",
+            "lula", "bolsonaro",
+        ]
 
     params["stopwords"] = stopwords
     query = f"""
@@ -1058,33 +1174,46 @@ def get_pred_category_distribution(filters=None, limit=30):
     params["limit"] = int(limit)
     query = f"""
     {cte},
+    hate_records AS (
+        SELECT COUNT(*)::double precision AS total_hate_records
+        FROM filtered
+        WHERE pred_label = 'hate'
+    ),
     categories AS (
         SELECT
             trim(token) AS pred_category_item
         FROM filtered
         CROSS JOIN LATERAL regexp_split_to_table(
-            CASE
-                WHEN pred_category IS NULL OR pred_category = 'None'
-                    THEN 'Sem categoria'
-                ELSE pred_category
-            END,
+            pred_category,
             '\\s*;\\s*'
         ) AS token
+        WHERE pred_category IS NOT NULL
+          AND pred_category <> 'None'
+          AND pred_label = 'hate'
+    ),
+    mention_total AS (
+        SELECT COUNT(*)::double precision AS total_mentions
+        FROM categories
     )
     SELECT
         pred_category_item,
         COUNT(*)::bigint AS total,
         ROUND(
-            (100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0))::numeric,
+            (100.0 * COUNT(*) / NULLIF((SELECT total_mentions FROM mention_total), 0))::numeric,
             2
-        )::double precision AS percent_total
+        )::double precision AS percent_of_mentions,
+        ROUND(
+            (100.0 * COUNT(*) / NULLIF((SELECT total_hate_records FROM hate_records), 0))::numeric,
+            2
+        )::double precision AS percent_of_hate_records
     FROM categories
     WHERE pred_category_item <> ''
+      AND pred_category_item <> 'other'
     GROUP BY pred_category_item
     ORDER BY total DESC
     LIMIT :limit
     """
-    return run_query(query, params)
+    return _add_labels(run_query(query, params))
 
 
 def get_pred_category_by_platform(filters=None, limit=120):
@@ -1098,13 +1227,11 @@ def get_pred_category_by_platform(filters=None, limit=120):
             trim(token) AS pred_category_item
         FROM filtered
         CROSS JOIN LATERAL regexp_split_to_table(
-            CASE
-                WHEN pred_category IS NULL OR pred_category = 'None'
-                    THEN 'Sem categoria'
-                ELSE pred_category
-            END,
+            pred_category,
             '\\s*;\\s*'
         ) AS token
+        WHERE pred_category IS NOT NULL
+          AND pred_category <> 'None'
     )
     SELECT
         platform,
@@ -1112,6 +1239,7 @@ def get_pred_category_by_platform(filters=None, limit=120):
         COUNT(*)::bigint AS total
     FROM categories
     WHERE pred_category_item <> ''
+      AND pred_category_item <> 'other'
     GROUP BY platform, pred_category_item
     ORDER BY total DESC
     LIMIT :limit
@@ -1131,18 +1259,17 @@ def get_category_temporal(filters=None, grain="month", limit=8):
             trim(token) AS pred_category_item
         FROM filtered
         CROSS JOIN LATERAL regexp_split_to_table(
-            CASE
-                WHEN pred_category IS NULL OR pred_category = 'None'
-                    THEN 'Sem categoria'
-                ELSE pred_category
-            END,
+            pred_category,
             '\\s*;\\s*'
         ) AS token
         WHERE published_at IS NOT NULL
+          AND pred_category IS NOT NULL
+          AND pred_category <> 'None'
     ),
     top_categories AS (
         SELECT pred_category_item, COUNT(*) AS total
         FROM categories
+        WHERE pred_category_item <> 'other'
         GROUP BY pred_category_item
         ORDER BY total DESC
         LIMIT :limit
@@ -1157,7 +1284,7 @@ def get_category_temporal(filters=None, grain="month", limit=8):
     GROUP BY c.period, c.pred_category_item
     ORDER BY c.period, total DESC
     """
-    return run_query(query, params)
+    return _add_labels(run_query(query, params))
 
 
 def get_probability_by_category(filters=None, limit=20):
@@ -1172,13 +1299,11 @@ def get_probability_by_category(filters=None, limit=20):
             category_probability
         FROM filtered
         CROSS JOIN LATERAL regexp_split_to_table(
-            CASE
-                WHEN pred_category IS NULL OR pred_category = 'None'
-                    THEN 'Sem categoria'
-                ELSE pred_category
-            END,
+            pred_category,
             '\\s*;\\s*'
         ) AS token
+        WHERE pred_category IS NOT NULL
+          AND pred_category <> 'None'
     )
     SELECT
         pred_category_item,
@@ -1187,9 +1312,296 @@ def get_probability_by_category(filters=None, limit=20):
         ROUND(AVG(category_probability)::numeric, 4)::double precision AS avg_category_probability
     FROM categories
     WHERE pred_category_item <> ''
+      AND pred_category_item <> 'other'
     GROUP BY pred_category_item
     ORDER BY total DESC
     LIMIT :limit
+    """
+    return _add_labels(run_query(query, params))
+
+
+def get_hate_intensity_by_category(filters=None, limit=20):
+    """Intensidade do hate (probabilidade média) e dimensões discursivas por categoria."""
+    cte, params = _filtered_cte(filters)
+    params["limit"] = int(limit)
+    query = f"""
+    {cte},
+    categories AS (
+        SELECT
+            trim(token) AS pred_category_item,
+            hate_probability,
+            category_probability,
+            evidencia_textual,
+            justificativa_curta,
+            alvo_identificado
+        FROM filtered
+        CROSS JOIN LATERAL regexp_split_to_table(
+            pred_category,
+            '\\s*;\\s*'
+        ) AS token
+        WHERE pred_category IS NOT NULL
+          AND pred_category <> 'None'
+          AND pred_label = 'hate'
+    )
+    SELECT
+        pred_category_item,
+        COUNT(*)::bigint AS total_hate,
+        ROUND(AVG(hate_probability)::numeric, 4)::double precision AS avg_hate_intensity,
+        ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY hate_probability)::numeric, 4)::double precision AS median_hate_intensity,
+        ROUND(AVG(category_probability)::numeric, 4)::double precision AS avg_category_probability,
+        COUNT(*) FILTER (WHERE hate_probability >= 0.8)::bigint AS high_intensity_count,
+        COUNT(*) FILTER (WHERE hate_probability >= 0.5 AND hate_probability < 0.8)::bigint AS medium_intensity_count,
+        COUNT(*) FILTER (WHERE hate_probability < 0.5)::bigint AS low_intensity_count
+    FROM categories
+    WHERE pred_category_item <> ''
+      AND pred_category_item <> 'other'
+    GROUP BY pred_category_item
+    ORDER BY avg_hate_intensity DESC
+    LIMIT :limit
+    """
+    return _add_labels(run_query(query, params))
+
+
+def get_hate_type_intersectionality(filters=None, limit=20):
+    """Sobreposição/interseccionalidade entre hate_types - pares que co-ocorrem com frequência."""
+    cte, params = _filtered_cte(filters)
+    params["limit"] = int(limit)
+    query = f"""
+    {cte},
+    typed AS (
+        SELECT
+            analysis_id,
+            ARRAY(
+                SELECT DISTINCT item
+                FROM unnest(hate_types) item
+                WHERE item IS NOT NULL
+                  AND item <> 'other'
+                ORDER BY item
+            ) AS types
+        FROM filtered
+        WHERE pred_label = 'hate'
+          AND cardinality(array_remove(hate_types, 'other')) >= 2
+    ),
+    pairs AS (
+        SELECT
+            a AS hate_type_a,
+            b AS hate_type_b,
+            COUNT(*)::bigint AS total_cooccurrences
+        FROM typed
+        CROSS JOIN LATERAL unnest(types) a
+        CROSS JOIN LATERAL unnest(types) b
+        WHERE a < b
+        GROUP BY a, b
+    ),
+    single_counts AS (
+        SELECT
+            hate_type,
+            COUNT(*)::bigint AS single_count
+        FROM filtered
+        CROSS JOIN LATERAL unnest(hate_types) AS ht(hate_type)
+        WHERE pred_label = 'hate'
+          AND hate_type <> 'other'
+        GROUP BY hate_type
+    )
+    SELECT
+        p.hate_type_a,
+        p.hate_type_b,
+        p.total_cooccurrences,
+        sc1.single_count AS count_a,
+        sc2.single_count AS count_b,
+        ROUND(
+            (100.0 * p.total_cooccurrences / NULLIF(LEAST(sc1.single_count, sc2.single_count), 0))::numeric,
+            2
+        )::double precision AS overlap_percentage_min,
+        ROUND(
+            (100.0 * p.total_cooccurrences / NULLIF(GREATEST(sc1.single_count, sc2.single_count), 0))::numeric,
+            2
+        )::double precision AS overlap_percentage_max
+    FROM pairs p
+    LEFT JOIN single_counts sc1 ON sc1.hate_type = p.hate_type_a
+    LEFT JOIN single_counts sc2 ON sc2.hate_type = p.hate_type_b
+    ORDER BY p.total_cooccurrences DESC
+    LIMIT :limit
+    """
+    return _add_labels(run_query(query, params))
+
+
+def get_hate_type_intersectionality_matrix(filters=None):
+    """Matriz completa de interseccionalidade para heatmap."""
+    cte, params = _filtered_cte(filters)
+    query = f"""
+    {cte},
+    typed AS (
+        SELECT
+            analysis_id,
+            ARRAY(
+                SELECT DISTINCT item
+                FROM unnest(hate_types) item
+                WHERE item IS NOT NULL
+                  AND item <> 'other'
+                ORDER BY item
+            ) AS types
+        FROM filtered
+        WHERE pred_label = 'hate'
+    ),
+    all_types AS (
+        SELECT DISTINCT hate_type
+        FROM filtered
+        CROSS JOIN LATERAL unnest(hate_types) AS ht(hate_type)
+        WHERE pred_label = 'hate'
+          AND hate_type <> 'other'
+    ),
+    pair_counts AS (
+        SELECT
+            a AS hate_type_a,
+            b AS hate_type_b,
+            COUNT(*)::bigint AS total_cooccurrences
+        FROM typed
+        CROSS JOIN LATERAL unnest(types) a
+        CROSS JOIN LATERAL unnest(types) b
+        WHERE a < b
+        GROUP BY a, b
+    ),
+    single_counts AS (
+        SELECT
+            hate_type,
+            COUNT(*)::bigint AS single_count
+        FROM filtered
+        CROSS JOIN LATERAL unnest(hate_types) AS ht(hate_type)
+        WHERE pred_label = 'hate'
+          AND hate_type <> 'other'
+        GROUP BY hate_type
+    )
+    SELECT
+        t1.hate_type AS hate_type_a,
+        t2.hate_type AS hate_type_b,
+        COALESCE(pc.total_cooccurrences, 0)::bigint AS total_cooccurrences,
+        COALESCE(sc1.single_count, 0)::bigint AS count_a,
+        COALESCE(sc2.single_count, 0)::bigint AS count_b,
+        CASE
+            WHEN t1.hate_type = t2.hate_type THEN 100.0
+            WHEN LEAST(COALESCE(sc1.single_count, 0), COALESCE(sc2.single_count, 0)) > 0
+            THEN ROUND(
+                (100.0 * COALESCE(pc.total_cooccurrences, 0) /
+                 NULLIF(LEAST(COALESCE(sc1.single_count, 0), COALESCE(sc2.single_count, 0)), 0))::numeric,
+                2
+            )::double precision
+            ELSE 0.0
+        END AS overlap_percentage
+    FROM all_types t1
+    CROSS JOIN all_types t2
+    LEFT JOIN pair_counts pc
+        ON (pc.hate_type_a = t1.hate_type AND pc.hate_type_b = t2.hate_type)
+           OR (pc.hate_type_a = t2.hate_type AND pc.hate_type_b = t1.hate_type)
+    LEFT JOIN single_counts sc1 ON sc1.hate_type = t1.hate_type
+    LEFT JOIN single_counts sc2 ON sc2.hate_type = t2.hate_type
+    ORDER BY t1.hate_type, t2.hate_type
+    """
+    return _add_labels(run_query(query, params))
+
+
+def get_response_pattern_analysis(filters=None, limit=50):
+    """Analisa padrões de respostas longas/repetitivas para detectar respostas genéricas/boilerplate."""
+    cte, params = _filtered_cte(filters, include_text=True)
+    params["limit"] = int(limit)
+    # Regex pattern for JSON array format detection
+    json_pattern = r'\{\s*"r"\s*:\s*\['
+    query = f"""
+    {cte},
+    response_stats AS (
+        SELECT
+            a.raw_response,
+            COUNT(*)::bigint AS frequency,
+            MIN(a.analysis_id) AS first_analysis_id,
+            MAX(a.analysis_id) AS last_analysis_id,
+            AVG(LENGTH(r.evidencia_textual))::int AS avg_text_length,
+            STRING_AGG(DISTINCT LEFT(r.evidencia_textual, 80), ' | ') AS text_samples
+        FROM filtered r
+        JOIN gemma_hate_analyses a ON a.analysis_id = r.analysis_id
+        WHERE r.status = 'success'
+          AND a.raw_response IS NOT NULL
+          AND a.raw_response <> ''
+        GROUP BY a.raw_response
+        HAVING COUNT(*) > 1
+    ),
+    response_features AS (
+        SELECT
+            raw_response,
+            frequency,
+            first_analysis_id,
+            last_analysis_id,
+            avg_text_length,
+            text_samples,
+            -- Detectar respostas com estrutura JSON repetitiva
+            raw_response ~ '{json_pattern}' AS is_json_array_format,
+            -- Detectar respostas muito longas (potencialmente verbosas)
+            LENGTH(raw_response) > 1000 AS is_long_response,
+            -- Detectar respostas com muitos campos repetidos
+            (LENGTH(raw_response) - LENGTH(REPLACE(raw_response, 'neutral_or_irrelevant', ''))) / LENGTH('neutral_or_irrelevant') AS neutral_count,
+            (LENGTH(raw_response) - LENGTH(REPLACE(raw_response, 'potential_group_attack', ''))) / LENGTH('potential_group_attack') AS potential_attack_count,
+            (LENGTH(raw_response) - LENGTH(REPLACE(raw_response, 'no_group_attack', ''))) / LENGTH('no_group_attack') AS no_attack_count,
+            (LENGTH(raw_response) - LENGTH(REPLACE(raw_response, 'ordinary_political_criticism', ''))) / LENGTH('ordinary_political_criticism') AS political_criticism_count
+        FROM response_stats
+    )
+    SELECT
+        raw_response,
+        frequency,
+        first_analysis_id,
+        last_analysis_id,
+        avg_text_length,
+        text_samples,
+        is_json_array_format,
+        is_long_response,
+        LENGTH(raw_response) AS response_length,
+        neutral_count,
+        potential_attack_count,
+        no_attack_count,
+        political_criticism_count,
+        CASE
+            WHEN frequency > 100 AND neutral_count > 2 THEN 'generic_neutral_boilerplate'
+            WHEN frequency > 50 AND potential_attack_count > 0 AND no_attack_count > 0 THEN 'generic_mixed_boilerplate'
+            WHEN frequency > 30 AND is_long_response THEN 'verbose_repeated'
+            WHEN frequency > 20 THEN 'repeated_pattern'
+            ELSE 'other'
+        END AS pattern_type
+    FROM response_features
+    ORDER BY frequency DESC, response_length DESC
+    LIMIT :limit
+    """
+    return run_query(query, params)
+
+
+def get_duplicate_response_stats(filters=None):
+    """Estatísticas gerais de respostas duplicadas."""
+    cte, params = _filtered_cte(filters, include_text=True)
+    query = f"""
+    {cte},
+    dup_stats AS (
+        SELECT
+            a.raw_response,
+            COUNT(*)::bigint AS frequency,
+            AVG(LENGTH(r.evidencia_textual))::int AS avg_text_length,
+            AVG(LENGTH(a.raw_response))::int AS avg_resp_length
+        FROM filtered r
+        JOIN gemma_hate_analyses a ON a.analysis_id = r.analysis_id
+        WHERE r.status = 'success'
+          AND a.raw_response IS NOT NULL
+          AND a.raw_response <> ''
+        GROUP BY a.raw_response
+    )
+    SELECT
+        COUNT(*)::bigint AS total_unique_responses,
+        SUM(frequency)::bigint AS total_records,
+        COUNT(*) FILTER (WHERE frequency > 1)::bigint AS responses_with_duplicates,
+        SUM(frequency) FILTER (WHERE frequency > 1)::bigint AS records_in_duplicates,
+        ROUND(
+            100.0 * SUM(frequency) FILTER (WHERE frequency > 1) / NULLIF(SUM(frequency), 0),
+            2
+        )::double precision AS pct_records_duplicated,
+        AVG(avg_text_length)::int AS avg_text_length_overall,
+        AVG(avg_resp_length)::int AS avg_resp_length_overall,
+        MAX(frequency)::bigint AS max_duplicate_count
+    FROM dup_stats
     """
     return run_query(query, params)
 
@@ -1520,37 +1932,64 @@ def get_semantic_network_edges(filters=None, limit=200, min_weight=5):
     return run_query(query, params)
 
 
+def _nli_scope_cte(view_name):
+    return f"""
+    WITH scoped AS (
+        SELECT r.*
+        FROM public.{view_name} r
+        LEFT JOIN public.posts p
+            ON r.post_id = p.id
+        LEFT JOIN public.comments c
+            ON r.comment_id = c.id
+        WHERE (
+            COALESCE(p.published_at, c.published_at) IS NULL
+            OR COALESCE(p.published_at, c.published_at)::date >= :dashboard_min_date
+        )
+    )
+    """
+
+
+def _nli_params(params=None):
+    merged = {"dashboard_min_date": DASHBOARD_MIN_DATE}
+    if params:
+        merged.update(params)
+    return merged
+
+
 def get_nli_layer3_summary():
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")}
     SELECT
         COUNT(*)::bigint AS total_results,
         COUNT(DISTINCT platform)::integer AS total_platforms,
         ROUND(AVG(primary_score)::numeric, 4)::double precision AS avg_primary_score,
         ROUND(AVG(toxicity_score)::numeric, 4)::double precision AS avg_toxicity_score
-    FROM public.v_radar_nli_layer3_results
+    FROM scoped
     """
-    return run_query(query)
+    return run_query(query, _nli_params())
 
 
 def get_nli_layer3_dimensions():
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")}
     SELECT
         e.key AS dimension,
-        ROUND(AVG((e.value #>> '{}')::double precision)::numeric, 4)::double precision
+        ROUND(AVG((e.value #>> '{{}}')::double precision)::numeric, 4)::double precision
             AS avg_score,
         COUNT(*)::bigint AS total_mentions
-    FROM public.v_radar_nli_layer3_results r
-    CROSS JOIN LATERAL jsonb_each(COALESCE(r.dimension_scores, '{}'::jsonb)) e
+    FROM scoped r
+    CROSS JOIN LATERAL jsonb_each(COALESCE(r.dimension_scores, '{{}}'::jsonb)) e
     WHERE jsonb_typeof(e.value) IN ('number', 'string')
-      AND (e.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+      AND (e.value #>> '{{}}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
     GROUP BY e.key
     ORDER BY avg_score DESC NULLS LAST
     """
-    return run_query(query)
+    return run_query(query, _nli_params())
 
 
 def get_nli_layer3_by_platform():
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")}
     SELECT
         lower(platform)::text AS platform,
         COUNT(*)::bigint AS total_results,
@@ -1563,15 +2002,16 @@ def get_nli_layer3_by_platform():
         COUNT(*) FILTER (WHERE toxicity_label = 'media')::bigint AS medium_toxicity,
         COUNT(*) FILTER (WHERE toxicity_label = 'baixa')::bigint AS low_toxicity,
         COUNT(*) FILTER (WHERE toxicity_label = 'nao_toxico')::bigint AS non_toxic
-    FROM public.v_radar_nli_layer3_results
+    FROM scoped
     GROUP BY lower(platform)::text
     ORDER BY avg_toxicity_score DESC NULLS LAST, total_results DESC
     """
-    return _add_labels(run_query(query))
+    return _add_labels(run_query(query, _nli_params()))
 
 
 def get_nli_layer3_primary_dimensions(limit=20):
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")}
     SELECT
         primary_dimension AS dimension,
         COUNT(*)::bigint AS total_results,
@@ -1579,17 +2019,18 @@ def get_nli_layer3_primary_dimensions(limit=20):
         ROUND(AVG(toxicity_score)::numeric, 4)::double precision AS avg_toxicity_score,
         ROUND(AVG(gemma_hate_probability)::numeric, 4)::double precision
             AS avg_gemma_hate_probability
-    FROM public.v_radar_nli_layer3_results
+    FROM scoped
     WHERE primary_dimension IS NOT NULL
     GROUP BY primary_dimension
     ORDER BY total_results DESC, avg_primary_score DESC NULLS LAST
     LIMIT :limit
     """
-    return run_query(query, {"limit": int(limit)})
+    return run_query(query, _nli_params({"limit": int(limit)}))
 
 
 def get_nli_layer3_toxicity_labels():
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")}
     SELECT
         COALESCE(NULLIF(toxicity_label, ''), 'sem_label') AS toxicity_label,
         COUNT(*)::bigint AS total_results,
@@ -1597,25 +2038,26 @@ def get_nli_layer3_toxicity_labels():
             AS percent_results,
         ROUND(AVG(toxicity_score)::numeric, 4)::double precision AS avg_toxicity_score,
         ROUND(AVG(primary_score)::numeric, 4)::double precision AS avg_primary_score
-    FROM public.v_radar_nli_layer3_results
+    FROM scoped
     GROUP BY COALESCE(NULLIF(toxicity_label, ''), 'sem_label')
     ORDER BY avg_toxicity_score DESC NULLS LAST, total_results DESC
     """
-    return run_query(query)
+    return run_query(query, _nli_params())
 
 
 def get_nli_layer3_active_dimensions(limit=20):
-    query = """
-    WITH exploded AS (
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")},
+    exploded AS (
         SELECT unnest(active_dimensions) AS dimension
-        FROM public.v_radar_nli_layer3_results
+        FROM scoped
         WHERE active_dimensions IS NOT NULL
           AND cardinality(active_dimensions) > 0
     )
     SELECT
         dimension,
         COUNT(*)::bigint AS total_results,
-        ROUND(100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM public.v_radar_nli_layer3_results), 0), 2)
+        ROUND(100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM scoped), 0), 2)
             ::double precision AS percent_results
     FROM exploded
     WHERE dimension IS NOT NULL
@@ -1623,11 +2065,12 @@ def get_nli_layer3_active_dimensions(limit=20):
     ORDER BY total_results DESC
     LIMIT :limit
     """
-    return run_query(query, {"limit": int(limit)})
+    return run_query(query, _nli_params({"limit": int(limit)}))
 
 
 def get_nli_layer3_gemma_buckets():
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")}
     SELECT
         CASE
             WHEN gemma_hate_probability IS NULL THEN 'sem_probabilidade'
@@ -1639,15 +2082,16 @@ def get_nli_layer3_gemma_buckets():
         COUNT(*)::bigint AS total_results,
         ROUND(AVG(toxicity_score)::numeric, 4)::double precision AS avg_nli_toxicity,
         ROUND(AVG(primary_score)::numeric, 4)::double precision AS avg_primary_score
-    FROM public.v_radar_nli_layer3_results
+    FROM scoped
     GROUP BY gemma_probability_bucket
     ORDER BY gemma_probability_bucket
     """
-    return run_query(query)
+    return run_query(query, _nli_params())
 
 
 def get_nli_layer3_examples(limit=40):
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer3_results")}
     SELECT
         result_id,
         lower(platform)::text AS platform,
@@ -1658,39 +2102,124 @@ def get_nli_layer3_examples(limit=40):
         ROUND(gemma_hate_probability::numeric, 4)::double precision AS gemma_hate_probability,
         left(regexp_replace(COALESCE(text_snapshot, ''), '\\s+', ' ', 'g'), 700) AS text_excerpt,
         created_at
-    FROM public.v_radar_nli_layer3_results
+    FROM scoped
     ORDER BY toxicity_score DESC NULLS LAST, primary_score DESC NULLS LAST, result_id DESC
     LIMIT :limit
     """
-    return _add_labels(run_query(query, {"limit": int(limit)}))
+    return _add_labels(run_query(query, _nli_params({"limit": int(limit)})))
 
 
 def get_nli_layer4_summary():
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer4_results")}
     SELECT
         COUNT(*)::bigint AS total_results,
         COUNT(DISTINCT platform)::integer AS total_platforms,
-        ROUND(AVG(primary_score)::numeric, 4)::double precision AS avg_primary_score
-    FROM public.v_radar_nli_layer4_results
+        COUNT(DISTINCT primary_dimension)::integer AS total_primary_dimensions,
+        ROUND(AVG(primary_score)::numeric, 4)::double precision AS avg_primary_score,
+        ROUND(AVG(gemma_hate_probability)::numeric, 4)::double precision
+            AS avg_gemma_hate_probability
+    FROM scoped
     """
-    return run_query(query)
+    return run_query(query, _nli_params())
+
+
+def get_nli_layer4_by_platform():
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer4_results")}
+    SELECT
+        lower(platform)::text AS platform,
+        COUNT(*)::bigint AS total_results,
+        COUNT(DISTINCT primary_dimension)::integer AS total_dimensions,
+        ROUND(AVG(primary_score)::numeric, 4)::double precision AS avg_primary_score,
+        ROUND(AVG(gemma_hate_probability)::numeric, 4)::double precision
+            AS avg_gemma_hate_probability
+    FROM scoped
+    GROUP BY lower(platform)::text
+    ORDER BY total_results DESC, avg_primary_score DESC NULLS LAST
+    """
+    return _add_labels(run_query(query, _nli_params()))
+
+
+def get_nli_layer4_primary_dimensions(limit=20):
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer4_results")}
+    SELECT
+        primary_dimension AS dimension,
+        COUNT(*)::bigint AS total_results,
+        ROUND(100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0), 2)::double precision
+            AS percent_results,
+        ROUND(AVG(primary_score)::numeric, 4)::double precision AS avg_primary_score,
+        ROUND(AVG(gemma_hate_probability)::numeric, 4)::double precision
+            AS avg_gemma_hate_probability
+    FROM scoped
+    WHERE primary_dimension IS NOT NULL
+    GROUP BY primary_dimension
+    ORDER BY total_results DESC, avg_primary_score DESC NULLS LAST
+    LIMIT :limit
+    """
+    return run_query(query, _nli_params({"limit": int(limit)}))
+
+
+def get_nli_layer4_active_dimensions(limit=20):
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer4_results")},
+    exploded AS (
+        SELECT unnest(active_dimensions) AS dimension
+        FROM scoped
+        WHERE active_dimensions IS NOT NULL
+          AND cardinality(active_dimensions) > 0
+    )
+    SELECT
+        dimension,
+        COUNT(*)::bigint AS total_results,
+        ROUND(100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM scoped), 0), 2)
+            ::double precision AS percent_results
+    FROM exploded
+    WHERE dimension IS NOT NULL
+    GROUP BY dimension
+    ORDER BY total_results DESC
+    LIMIT :limit
+    """
+    return run_query(query, _nli_params({"limit": int(limit)}))
 
 
 def get_nli_layer4_dimensions():
-    query = """
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer4_results")}
     SELECT
         e.key AS dimension,
-        ROUND(AVG((e.value #>> '{}')::double precision)::numeric, 4)::double precision
+        ROUND(AVG((e.value #>> '{{}}')::double precision)::numeric, 4)::double precision
             AS avg_score,
         COUNT(*)::bigint AS total_mentions
-    FROM public.v_radar_nli_layer4_results r
-    CROSS JOIN LATERAL jsonb_each(COALESCE(r.dimension_scores, '{}'::jsonb)) e
+    FROM scoped r
+    CROSS JOIN LATERAL jsonb_each(COALESCE(r.dimension_scores, '{{}}'::jsonb)) e
     WHERE jsonb_typeof(e.value) IN ('number', 'string')
-      AND (e.value #>> '{}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+      AND (e.value #>> '{{}}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
     GROUP BY e.key
     ORDER BY avg_score DESC NULLS LAST
     """
-    return run_query(query)
+    return run_query(query, _nli_params())
+
+
+def get_nli_layer4_construct_scores(limit=30):
+    query = f"""
+    {_nli_scope_cte("v_radar_nli_layer4_results")}
+    SELECT
+        e.key AS construct,
+        split_part(e.key, '.', 1) AS dimension,
+        ROUND(AVG((e.value #>> '{{}}')::double precision)::numeric, 4)::double precision
+            AS avg_score,
+        COUNT(*)::bigint AS total_mentions
+    FROM scoped r
+    CROSS JOIN LATERAL jsonb_each(COALESCE(r.construct_scores, '{{}}'::jsonb)) e
+    WHERE jsonb_typeof(e.value) IN ('number', 'string')
+      AND (e.value #>> '{{}}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+    GROUP BY e.key, split_part(e.key, '.', 1)
+    ORDER BY avg_score DESC NULLS LAST, total_mentions DESC
+    LIMIT :limit
+    """
+    return run_query(query, _nli_params({"limit": int(limit)}))
 
 
 def build_interpretive_report(filters=None):
@@ -1721,7 +2250,7 @@ def build_interpretive_report(filters=None):
             f"- A maior prevalência proporcional aparece em "
             f"{top_pct['platform_label']} ({float(top_pct['hate_percent'] or 0):.2f}%). "
             f"Em volume absoluto, {top_abs['platform_label']} concentra "
-            f"{int(top_abs['total_hate']):,} ocorrências de hate."
+            f"{int(top_abs['total_hate']):,} ocorrências de discurso de ódio."
         )
 
     if not content_kind.empty:

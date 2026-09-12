@@ -1,28 +1,31 @@
 CHART_TEMPLATE = "plotly_white"
 CHART_FONT = "Inter, Source Sans 3, Arial, sans-serif"
-CHART_TEXT = "#27323F"
-CHART_MUTED = "#687589"
-CHART_GRID = "rgba(104, 117, 137, 0.16)"
-CHART_ZERO = "rgba(104, 117, 137, 0.24)"
+CHART_TEXT = "#24303D"
+CHART_MUTED = "#63746F"
+CHART_GRID = "rgba(67, 94, 86, 0.12)"
+CHART_ZERO = "rgba(67, 94, 86, 0.22)"
 
-PRIMARY = "#426C9D"
-MINT = "#6FAF92"
-LAVENDER = "#9F8AC2"
-SLATE = "#687589"
-SOFT_CORAL = "#C97575"
-SAND = "#C8B696"
-OFF_WHITE = "#F7F4EF"
+PRIMARY = "#2D866D"
+MINT = "#7FCDBB"
+LAVENDER = "#7B76D1"
+SLATE = "#63746F"
+SOFT_CORAL = "#F17373"
+SAND = "#F2A93B"
+TEAL = "#1EA4A6"
+ROSE = "#C45B91"
+SAGE = "#9BC56E"
+OFF_WHITE = "#F4F5F3"
 CARD_BG = "#FFFFFF"
-HIGHLIGHT = "#EDF5F2"
+HIGHLIGHT = "#E7F4EF"
 
 SEQUENTIAL_BLUE = [
     HIGHLIGHT,
-    "#D8E6F8",
-    PRIMARY,
+    "#CDEADF",
+    "#2D866D",
 ]
 
 SEQUENTIAL_MINT = [
-    "#F1F8F5",
+    "#EFF9F5",
     MINT,
     PRIMARY,
 ]
@@ -42,14 +45,14 @@ SEQUENTIAL_WARM = [
 CATEGORY_PALETTE = [
     PRIMARY,
     MINT,
+    TEAL,
     LAVENDER,
     SAND,
-    SLATE,
     SOFT_CORAL,
-    "#4E8A93",
-    "#9A7A54",
-    "#7D90A6",
-    "#B88A9B",
+    SAGE,
+    ROSE,
+    SLATE,
+    "#4B9DD8",
 ]
 
 HATE_COLOR = SOFT_CORAL
@@ -78,11 +81,26 @@ def base_plotly_layout(
         "font": {
             "color": CHART_TEXT,
             "family": CHART_FONT,
+            "size": 11,
         },
         "coloraxis_showscale": coloraxis_showscale,
         "legend": {
+            "orientation": "v",
+            "bgcolor": "rgba(255,255,255,0.82)",
+            "bordercolor": "rgba(225,232,228,0.9)",
+            "borderwidth": 0,
             "font": {
                 "color": CHART_MUTED,
+                "size": 11,
+            },
+        },
+        "hoverlabel": {
+            "bgcolor": CARD_BG,
+            "bordercolor": "rgba(230,225,220,0.95)",
+            "font": {
+                "color": CHART_TEXT,
+                "family": CHART_FONT,
+                "size": 11,
             },
         },
     }
@@ -90,25 +108,29 @@ def base_plotly_layout(
     if include_axes:
         layout["xaxis"] = {
             "showgrid": False,
+            "showline": False,
             "zerolinecolor": CHART_ZERO,
+            "automargin": True,
             "tickfont": {
-                "size": 11,
+                "size": 10,
                 "color": CHART_MUTED,
             },
             "title_font": {
-                "size": 12,
+                "size": 11,
                 "color": CHART_MUTED,
             },
         }
         layout["yaxis"] = {
             "gridcolor": CHART_GRID,
+            "showline": False,
             "zerolinecolor": CHART_ZERO,
+            "automargin": True,
             "tickfont": {
-                "size": 11,
+                "size": 10,
                 "color": CHART_MUTED,
             },
             "title_font": {
-                "size": 12,
+                "size": 11,
                 "color": CHART_MUTED,
             },
         }

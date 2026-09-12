@@ -1,4 +1,3 @@
-import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -8,17 +7,12 @@ from components.ui import format_int, format_pct, metric_grid, render_hero, rend
 from services.queries import (
     MODEL_NAME,
     get_hate_type_frequency,
-    get_hate_type_toxicity_timeseries,
     get_overview_metrics,
     get_platform_analysis,
 )
 
 
-st.set_page_config(
-    page_title="Radar de Ódio Online",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Panorama Multirrede | Radar", layout="wide", initial_sidebar_state="expanded")
 
 load_css()
 render_sidebar_brand()
@@ -26,8 +20,11 @@ filters = {}
 
 render_hero(
     "Panorama multirrede",
-    'Radar do <span class="hero-gradient">ódio online</span>',
-    "Painel de monitoramento do discurso de ódio em plataformas digitais brasileiras.",
+    'Panorama <span class="hero-gradient">multirrede</span>',
+    (
+        f"Resumo executivo das classificações {MODEL_NAME}, com volume, prevalência, "
+        "tipologias principais e registros recentes."
+    ),
 )
 
 metrics = get_overview_metrics(filters).iloc[0]
@@ -37,95 +34,13 @@ metric_grid(
         ("Discurso de ódio", format_int(metrics["total_hate"])),
         ("Sem discurso de ódio", format_int(metrics["total_non_hate"])),
         ("Taxa de discurso de ódio", format_pct(metrics["hate_percent"])),
-        ("Plataformas", format_int(metrics["total_platforms"])),
+        ("Posts", format_int(metrics["total_posts"])),
     ]
 )
 
 platform_df = get_platform_analysis(filters)
 social_df = platform_df.loc[platform_df["platform_group"] == "social_network"].copy()
 messaging_df = platform_df.loc[platform_df["platform_group"] == "instant_messaging"].copy()
-
-section_header(
-    "Toxicidade por tipo",
-    "Participação mensal dos tipos de preconceito entre os conteúdos classificados como discurso de ódio.",
-)
-toxicity_series_df = get_hate_type_toxicity_timeseries(filters={}, grain="month", limit=10)
-
-if toxicity_series_df.empty:
-    st.info("Não há dados temporais suficientes para exibir toxicidade por tipo na página inicial.")
-else:
-    toxicity_series_df = toxicity_series_df.copy()
-    toxicity_series_df["period"] = pd.to_datetime(toxicity_series_df["period"])
-    toxicity_series_df["percent_mentions"] = toxicity_series_df["percent_mentions"].fillna(0)
-
-    type_order = (
-        toxicity_series_df.groupby("hate_type")["total_mentions"]
-        .sum()
-        .sort_values(ascending=False)
-        .index.tolist()
-    )
-    toxicity_palette = [
-        "#3B35E8",
-        "#F9507A",
-        "#8B5CF6",
-        "#EAB308",
-        "#008C9E",
-        "#F97316",
-        "#16A34A",
-        "#0EA5E9",
-        "#B7791F",
-        "#DB2777",
-    ]
-    color_map = {
-        hate_type: toxicity_palette[idx % len(toxicity_palette)]
-        for idx, hate_type in enumerate(type_order)
-    }
-
-    toxicity_fig = go.Figure()
-    for hate_type in type_order:
-        group = toxicity_series_df.loc[toxicity_series_df["hate_type"] == hate_type].sort_values("period")
-        if group.empty:
-            continue
-        label = group["hate_type_label"].iloc[0]
-        toxicity_fig.add_trace(
-            go.Scatter(
-                x=group["period"],
-                y=group["percent_mentions"],
-                customdata=group[["total_mentions", "period_total_mentions", "avg_toxicity"]],
-                mode="lines",
-                name=label,
-                line=dict(color=color_map[hate_type], width=2.3),
-                hovertemplate=(
-                    "<b>%{fullData.name}</b><br>"
-                    "Período: %{x|%m/%Y}<br>"
-                    "Participação: %{y:.2f}%<br>"
-                    "Menções do tipo: %{customdata[0]:,.0f}<br>"
-                    "Menções no período: %{customdata[1]:,.0f}<br>"
-                    "Probabilidade média Gemma: %{customdata[2]:.3f}<extra></extra>"
-                ),
-            )
-        )
-
-    toxicity_layout = base_plotly_layout(height=500, margin=dict(t=34, b=42, l=14, r=18))
-    toxicity_layout.update(
-        {
-            "hovermode": "x unified",
-            "legend": dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5,
-                font=dict(size=10),
-            ),
-            "xaxis_title": "Período",
-            "yaxis_title": "% das menções",
-        }
-    )
-    toxicity_fig.update_layout(**toxicity_layout)
-    toxicity_fig.update_yaxes(range=[0, 100], ticksuffix="%", dtick=10)
-    toxicity_fig.update_xaxes(tickformat="%b<br>%Y", showgrid=False)
-    st.plotly_chart(toxicity_fig, width="stretch")
 
 
 def render_platform_panel(title, subtitle, data, color):
@@ -153,7 +68,7 @@ def render_platform_panel(title, subtitle, data, color):
         )
     )
     fig.update_layout(
-        **base_plotly_layout(height=420, margin=dict(t=24, b=18, l=12, r=12)),
+        **base_plotly_layout(height=430, margin=dict(t=24, b=18, l=12, r=12)),
         xaxis_title="% discurso de ódio",
         yaxis_title="Plataforma",
         showlegend=False,
@@ -167,14 +82,14 @@ left, right = st.columns(2)
 with left:
     render_platform_panel(
         "Apps de mensagens",
-        "WhatsApp e Telegram analisados como apps de mensagens.",
+        "WhatsApp e Telegram analisados separadamente das redes sociais.",
         messaging_df,
         PRIMARY,
     )
 
 with right:
     render_platform_panel(
-        "Plataformas sociais",
+        "Redes sociais",
         "Facebook, Reddit, TikTok, Twitter e YouTube no mesmo grupo analítico.",
         social_df,
         MINT,
@@ -230,7 +145,7 @@ with left:
 
 with right:
     render_type_panel(
-        "Tipologias em plataformas sociais",
+        "Tipologias em redes sociais",
         "Frequência dos tipos em Facebook, Reddit, TikTok, Twitter e YouTube.",
         social_df["platform"].tolist(),
     )

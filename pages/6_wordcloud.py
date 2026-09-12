@@ -29,9 +29,9 @@ render_sidebar_brand()
 
 render_hero(
     "Léxico",
-    'Termos do <span class="hero-gradient">discurso de ódio</span>',
+    'Termos do <span class="hero-gradient">ódio online</span>',
     (
-        "Crie uma nuvem lexical focada nos conteúdos classificados como hate. "
+        "Crie uma nuvem lexical focada nos conteúdos classificados como discurso de ódio. "
         "Use os filtros para comparar redes, posts, comentários e tipos específicos de ódio."
     ),
 )
@@ -85,25 +85,29 @@ pred_map = build_label_map(pred_labels, PRED_LABELS)
 hate_type_map = build_label_map(hate_types, HATE_TYPE_LABELS)
 
 section_header(
-    "Filtros da wordcloud",
-    "Por padrão, a nuvem usa apenas conteúdos classificados como hate. Altere a classificação se quiser comparar outros recortes.",
+    "Filtros da nuvem de palavras",
+    "Por padrão, a nuvem usa apenas conteúdos classificados como discurso de ódio. Altere a classificação se quiser comparar outros recortes.",
 )
 
 row1_col1, row1_col2 = st.columns(2)
 with row1_col1:
     selected_platform_labels = st.multiselect(
-        "Redes sociais",
+        "Plataformas",
         options=list(platform_map.keys()),
         default=list(platform_map.keys()),
-        placeholder="Selecione uma ou mais redes",
+        placeholder="Selecione uma ou mais plataformas",
     )
 with row1_col2:
-    default_pred_labels = ["Hate"] if "Hate" in pred_map else list(pred_map.keys())
+    default_pred_labels = (
+        ["Discurso de ódio"]
+        if "Discurso de ódio" in pred_map
+        else list(pred_map.keys())
+    )
     selected_pred_labels = st.multiselect(
         "Classificação",
         options=list(pred_map.keys()),
         default=default_pred_labels,
-        placeholder="Selecione hate, não hate ou ambos",
+        placeholder="Selecione discurso de ódio, sem discurso de ódio ou ambos",
     )
 
 row2_col1, row2_col2 = st.columns(2)
@@ -116,10 +120,10 @@ with row2_col1:
     )
 with row2_col2:
     selected_hate_type_labels = st.multiselect(
-        "Tipo de hate",
+        "Tipo de preconceito",
         options=list(hate_type_map.keys()),
         default=[],
-        placeholder="Opcional: restrinja a um ou mais hate_types",
+        placeholder="Opcional: restrinja a um ou mais tipos de preconceito",
     )
 
 row3_col1, row3_col2 = st.columns([2, 1])
@@ -133,13 +137,13 @@ with row3_col2:
 
 source_label = st.radio(
     "Fonte lexical",
-    ["Evidência textual da LLM", "Texto completo"],
+    ["Evidência textual do modelo", "Texto completo"],
     horizontal=True,
 )
-text_source = "evidence" if source_label == "Evidência textual da LLM" else "content"
+text_source = "evidence" if source_label == "Evidência textual do modelo" else "content"
 
 if not selected_platform_labels or not selected_pred_labels or not selected_kind_labels:
-    st.warning("Selecione ao menos uma rede, uma classificação e um tipo de conteúdo para gerar a wordcloud.")
+    st.warning("Selecione ao menos uma plataforma, uma classificação e um tipo de conteúdo para gerar a nuvem de palavras.")
     st.stop()
 
 selected_platforms = [platform_map[label] for label in selected_platform_labels]
@@ -170,13 +174,13 @@ terms_df["frequency"] = terms_df["frequency"].astype(int)
 
 filter_summary = []
 if len(selected_platforms) != len(platforms):
-    filter_summary.append(f"redes: {', '.join(selected_platform_labels)}")
+    filter_summary.append(f"plataformas: {', '.join(selected_platform_labels)}")
 if len(selected_pred_values) != len(pred_labels):
     filter_summary.append(f"classificação: {', '.join(selected_pred_labels)}")
 if len(selected_kinds) != len(content_kinds):
     filter_summary.append(f"conteúdo: {', '.join(selected_kind_labels)}")
 if selected_hate_types:
-    filter_summary.append(f"hate_types: {', '.join(selected_hate_type_labels)}")
+    filter_summary.append(f"tipos de preconceito: {', '.join(selected_hate_type_labels)}")
 if search_text.strip():
     filter_summary.append(f"contém: {search_text.strip()}")
 filter_summary.append(f"fonte: {source_label}")
@@ -186,11 +190,11 @@ metric_grid(
         ("Termos", format_int(len(terms_df))),
         ("Frequência total", format_int(terms_df["frequency"].sum())),
         ("Termo principal", terms_df.iloc[0]["term"]),
-        ("Recorte", " · ".join(filter_summary) if filter_summary else "hate · banco completo"),
+        ("Recorte", " · ".join(filter_summary) if filter_summary else "discurso de ódio · banco completo"),
     ]
 )
 
-section_header("Wordcloud de hate", "O tamanho das palavras representa frequência nos conteúdos filtrados.")
+section_header("Nuvem de palavras de discurso de ódio", "O tamanho das palavras representa frequência nos conteúdos filtrados.")
 freq = {
     row["term"]: int(row["frequency"])
     for _, row in terms_df.iterrows()

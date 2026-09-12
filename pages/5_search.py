@@ -41,8 +41,8 @@ metric_grid(
     [
         ("Resultados", format_int(total_records)),
         ("Redes", format_int(platform_df["platform"].nunique() if not platform_df.empty else 0)),
-        ("Hate", format_int(platform_df["total_hate"].sum() if not platform_df.empty else 0)),
-        ("Tipos", format_int(type_df["hate_type"].nunique() if not type_df.empty else 0)),
+        ("Discurso de ódio", format_int(platform_df["total_hate"].sum() if not platform_df.empty else 0)),
+        ("Tipos de preconceito", format_int(type_df["hate_type"].nunique() if not type_df.empty else 0)),
     ]
 )
 
@@ -61,6 +61,11 @@ with left:
             color="hate_percent",
             text="total_content",
             color_continuous_scale=SEQUENTIAL_WARM,
+            labels={
+                "hate_percent": "Discurso de ódio (%)",
+                "total_content": "Resultados",
+                "platform_label": "Rede",
+            },
         )
         fig.update_layout(
             **base_plotly_layout(height=380, margin=dict(t=24, b=18, l=12, r=12)),
@@ -70,7 +75,7 @@ with left:
         st.plotly_chart(fig, width="stretch")
 
 with right:
-    section_header("Tipos encontrados", "Tipologias associadas aos resultados da busca.")
+    section_header("Tipos encontrados", "Tipologias de preconceito associadas aos resultados da busca.")
     if type_df.empty:
         st.info("Sem tipologias no resultado.")
     else:
@@ -86,7 +91,7 @@ with right:
         fig.update_layout(
             **base_plotly_layout(height=380, margin=dict(t=24, b=18, l=12, r=12)),
             xaxis_title="Menções",
-            yaxis_title="Tipo",
+            yaxis_title="Tipo de preconceito",
             showlegend=False,
         )
         st.plotly_chart(fig, width="stretch")
@@ -106,8 +111,8 @@ else:
             "platform_label": "Rede",
             "content_kind_label": "Tipo",
             "pred_label_label": "Classificação",
-            "hate_probability": "Probabilidade hate",
-            "hate_types": "Tipos",
+            "hate_probability": "Probabilidade de discurso de ódio",
+            "hate_types_label": "Tipos de preconceito",
             "published_at": "Publicado em",
             "text_excerpt": "Trecho",
             "evidencia_textual": "Evidência",
@@ -120,8 +125,8 @@ else:
                 "Rede",
                 "Tipo",
                 "Classificação",
-                "Probabilidade hate",
-                "Tipos",
+                "Probabilidade de discurso de ódio",
+                "Tipos de preconceito",
                 "Publicado em",
                 "Trecho",
                 "Evidência",

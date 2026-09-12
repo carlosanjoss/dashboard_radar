@@ -16,7 +16,7 @@ filters = {}
 render_hero(
     "Posts e threads",
     'Conteúdos <span class="hero-gradient">monitorados</span>',
-    "Agrupamento por post raiz para localizar threads ou publicações com maior concentração de hate.",
+    "Agrupamento por post raiz para localizar threads ou publicações com maior concentração de discurso de ódio.",
 )
 
 min_records = 1
@@ -30,7 +30,7 @@ metric_grid(
     [
         ("Posts/threads", format_int(posts_df["post_id"].nunique())),
         ("Registros", format_int(posts_df["total_records"].sum())),
-        ("Hate", format_int(posts_df["total_hate"].sum())),
+        ("Discurso de ódio", format_int(posts_df["total_hate"].sum())),
         ("Comentários", format_int(posts_df["total_comments"].sum())),
     ]
 )
@@ -38,7 +38,7 @@ metric_grid(
 left, right = st.columns(2)
 
 with left:
-    section_header("Threads com mais hate", "Ranking por volume absoluto de registros hate.")
+    section_header("Threads com mais discurso de ódio", "Ranking por volume absoluto de registros com discurso de ódio.")
     top_df = posts_df.head(25)
     fig = px.bar(
         top_df,
@@ -49,16 +49,24 @@ with left:
         text="total_hate",
         color_continuous_scale=SEQUENTIAL_WARM,
         hover_data=["platform_label", "total_records", "total_comments"],
+        labels={
+            "total_hate": "Discurso de ódio",
+            "hate_percent": "Discurso de ódio (%)",
+            "post_title": "Post/thread",
+            "platform_label": "Rede",
+            "total_records": "Registros",
+            "total_comments": "Comentários",
+        },
     )
     fig.update_layout(
         **base_plotly_layout(height=560, margin=dict(t=24, b=18, l=12, r=12)),
-        xaxis_title="Hate",
+        xaxis_title="Discurso de ódio",
         yaxis_title="Post/thread",
     )
     st.plotly_chart(fig, width="stretch")
 
 with right:
-    section_header("Volume vs prevalência", "Relação entre total de registros e percentual de hate.")
+    section_header("Volume vs prevalência", "Relação entre total de registros e percentual de discurso de ódio.")
     fig = px.scatter(
         posts_df,
         x="total_records",
@@ -68,49 +76,22 @@ with right:
         hover_name="post_title",
         hover_data=["platform_label", "engagement_total"],
         color_continuous_scale=SEQUENTIAL_BLUE,
+        labels={
+            "hate_percent": "Discurso de ódio (%)",
+            "avg_hate_probability": "Probabilidade média de discurso de ódio",
+            "total_hate": "Discurso de ódio",
+            "total_records": "Registros",
+            "platform_label": "Rede",
+            "engagement_total": "Engajamento",
+        },
     )
     fig.update_layout(
         **base_plotly_layout(height=560, margin=dict(t=24, b=18, l=12, r=12)),
         xaxis_title="Registros",
-        yaxis_title="% hate",
+        yaxis_title="% discurso de ódio",
     )
+    fig.update_yaxes(range=[0, 100], ticksuffix="%", dtick=10)
     st.plotly_chart(fig, width="stretch")
-
-section_header("Tabela investigativa", "Posts ou threads agregados por post raiz.")
-display_df = posts_df.rename(
-    columns={
-        "platform_label": "Rede",
-        "post_title": "Título/trecho",
-        "total_records": "Registros",
-        "total_posts": "Posts",
-        "total_comments": "Comentários",
-        "total_hate": "Hate",
-        "hate_percent": "% hate",
-        "avg_hate_probability": "Probabilidade média",
-        "engagement_total": "Engajamento",
-        "first_published_at": "Primeira data",
-        "last_published_at": "Última data",
-    }
-)
-st.dataframe(
-    display_df[
-        [
-            "Rede",
-            "Título/trecho",
-            "Registros",
-            "Posts",
-            "Comentários",
-            "Hate",
-            "% hate",
-            "Probabilidade média",
-            "Engajamento",
-            "Primeira data",
-            "Última data",
-        ]
-    ],
-    width="stretch",
-    height=520,
-)
 
 section_header("Explorar registros de um post", "Conteúdos classificados associados ao post/thread selecionado.")
 post_options = {
@@ -127,8 +108,8 @@ else:
             "platform_label": "Rede",
             "content_kind_label": "Tipo",
             "pred_label_label": "Classificação",
-            "hate_probability": "Probabilidade hate",
-            "hate_types": "Tipos",
+            "hate_probability": "Probabilidade de discurso de ódio",
+            "hate_types_label": "Tipos de preconceito",
             "published_at": "Publicado em",
             "text_excerpt": "Trecho",
             "justificativa_curta": "Justificativa",
@@ -140,8 +121,8 @@ else:
                 "Rede",
                 "Tipo",
                 "Classificação",
-                "Probabilidade hate",
-                "Tipos",
+                "Probabilidade de discurso de ódio",
+                "Tipos de preconceito",
                 "Publicado em",
                 "Trecho",
                 "Justificativa",

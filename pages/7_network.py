@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -9,7 +8,7 @@ try:
 except ModuleNotFoundError:
     nx = None
 
-from components.charts import CATEGORY_PALETTE, MINT, LAVENDER, PRIMARY, base_plotly_layout
+from components.charts import MINT, LAVENDER, PRIMARY, base_plotly_layout
 from components.styles import load_css
 from components.ui import format_int, metric_grid, render_hero, render_sidebar_brand, section_header
 from services.queries import (
@@ -29,7 +28,7 @@ filters = {}
 render_hero(
     "Rede semântica",
     'Relações <span class="hero-gradient">entre tipos</span>',
-    "Grafo entre redes sociais, tipos de conteúdo, hate_types e coocorrências.",
+    "Grafo entre plataformas, tipos de conteúdo, tipos de preconceito e coocorrências.",
 )
 
 limit = 260
@@ -184,7 +183,7 @@ network_layout.update(
 )
 fig.update_layout(**network_layout)
 
-section_header("Grafo de relações", "Azul = redes · verde = conteúdo · lavanda = tipos de hate.")
+section_header("Grafo de relações", "Azul = redes · verde = conteúdo · lavanda = tipos de preconceito.")
 st.plotly_chart(fig, width="stretch")
 
 metric_grid(
@@ -195,41 +194,3 @@ metric_grid(
         ("Tipos de relação", format_int(edges_df["relation"].nunique())),
     ]
 )
-
-left, right = st.columns(2)
-with left:
-    section_header("Relações mais fortes", "Arestas com maior peso no grafo.")
-    st.dataframe(
-        edges_df.head(80).assign(
-            origem=edges_df["source"].map(node_label),
-            destino=edges_df["target"].map(node_label),
-        )[["origem", "destino", "relation", "total"]].rename(
-            columns={
-                "origem": "Origem",
-                "destino": "Destino",
-                "relation": "Relação",
-                "total": "Peso",
-            }
-        ),
-        width="stretch",
-        height=420,
-    )
-
-with right:
-    section_header("Distribuição por relação", "Peso agregado por tipo de aresta.")
-    relation_df = edges_df.groupby("relation", as_index=False)["total"].sum()
-    fig = px.bar(
-        relation_df,
-        x="relation",
-        y="total",
-        color="relation",
-        text="total",
-        color_discrete_sequence=CATEGORY_PALETTE,
-    )
-    fig.update_layout(
-        **base_plotly_layout(height=420, margin=dict(t=24, b=18, l=12, r=12)),
-        xaxis_title="Relação",
-        yaxis_title="Peso",
-        showlegend=False,
-    )
-    st.plotly_chart(fig, width="stretch")

@@ -30,7 +30,7 @@ metric_grid(
     [
         ("Perfis", format_int(authors_df["profile_id"].nunique())),
         ("Conteúdos", format_int(authors_df["total_content"].sum())),
-        ("Hate", format_int(authors_df["total_hate"].sum())),
+        ("Discurso de ódio", format_int(authors_df["total_hate"].sum())),
         ("Redes médias", f"{authors_df['total_platforms'].mean():.2f}".replace(".", ",")),
     ]
 )
@@ -38,7 +38,7 @@ metric_grid(
 left, right = st.columns(2)
 
 with left:
-    section_header("Perfis com mais hate", "Ranking por volume absoluto de conteúdos classificados como hate.")
+    section_header("Perfis com mais discurso de ódio", "Ranking por volume absoluto de conteúdos classificados como discurso de ódio.")
     top_df = authors_df.head(25)
     fig = px.bar(
         top_df,
@@ -48,16 +48,21 @@ with left:
         color="hate_percent",
         text="total_hate",
         color_continuous_scale=SEQUENTIAL_WARM,
+        labels={
+            "total_hate": "Discurso de ódio",
+            "hate_percent": "Discurso de ódio (%)",
+            "profile_id": "Perfil",
+        },
     )
     fig.update_layout(
         **base_plotly_layout(height=520, margin=dict(t=24, b=18, l=12, r=12)),
-        xaxis_title="Hate",
+        xaxis_title="Discurso de ódio",
         yaxis_title="Perfil",
     )
     st.plotly_chart(fig, width="stretch")
 
 with right:
-    section_header("Atividade vs prevalência", "Relação entre volume total e percentual de hate por perfil.")
+    section_header("Atividade vs prevalência", "Relação entre volume total e percentual de discurso de ódio por perfil.")
     fig = px.scatter(
         authors_df,
         x="total_content",
@@ -67,15 +72,24 @@ with right:
         hover_name="profile_id",
         hover_data=["total_platforms", "engagement_total"],
         color_continuous_scale=SEQUENTIAL_BLUE,
+        labels={
+            "total_content": "Conteúdos",
+            "hate_percent": "Discurso de ódio (%)",
+            "avg_hate_probability": "Probabilidade média de discurso de ódio",
+            "total_hate": "Discurso de ódio",
+            "total_platforms": "Redes",
+            "engagement_total": "Engajamento",
+        },
     )
     fig.update_layout(
         **base_plotly_layout(height=520, margin=dict(t=24, b=18, l=12, r=12)),
         xaxis_title="Conteúdos",
-        yaxis_title="% hate",
+        yaxis_title="% discurso de ódio",
     )
+    fig.update_yaxes(range=[0, 100], ticksuffix="%", dtick=10)
     st.plotly_chart(fig, width="stretch")
 
-section_header("Tipologias por perfil", "Tipos de hate mais frequentes entre perfis anonimizados.")
+section_header("Tipologias por perfil", "Tipos de preconceito mais frequentes entre perfis anonimizados.")
 author_types = get_author_type_distribution(filters, limit=100, min_records=min_records)
 if author_types.empty:
     st.info("Sem tipologias suficientes por perfil.")
@@ -91,28 +105,13 @@ else:
         values="total_mentions",
         hole=0.55,
         color_discrete_sequence=CATEGORY_PALETTE,
+        labels={
+            "hate_type_label": "Tipo de preconceito",
+            "total_mentions": "Menções",
+        },
     )
     fig.update_layout(
         **base_plotly_layout(height=430, margin=dict(t=24, b=18, l=12, r=12)),
         legend_title="Tipo",
     )
     st.plotly_chart(fig, width="stretch")
-
-section_header("Tabela de perfis", "Dados agregados; hash interno permanece oculto.")
-st.dataframe(
-    authors_df.drop(columns=["author_hash"]).rename(
-        columns={
-            "profile_id": "Perfil",
-            "total_content": "Conteúdos",
-            "total_hate": "Hate",
-            "hate_percent": "% hate",
-            "total_platforms": "Redes",
-            "total_posts": "Posts",
-            "total_comments": "Comentários",
-            "avg_hate_probability": "Probabilidade média",
-            "engagement_total": "Engajamento",
-        }
-    ),
-    width="stretch",
-    height=520,
-)

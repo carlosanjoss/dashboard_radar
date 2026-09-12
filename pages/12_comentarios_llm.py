@@ -9,17 +9,17 @@ from components.ui import format_int, format_pct, metric_grid, render_hero, rend
 from services.queries import PLATFORM_LABELS, get_filter_options, get_records_count, get_records_page
 
 
-st.set_page_config(page_title="Comentários e LLM | Radar", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Comentários Analisados | Radar", layout="wide", initial_sidebar_state="expanded")
 
 load_css()
 render_sidebar_brand()
 
 render_hero(
-    "Comentários e LLM",
+    "Comentários analisados",
     'Consulta de <span class="hero-gradient">classificações</span>',
     (
-        "Consulta de comentários classificados pelo Gemma, com evidência textual, alvo identificado "
-        "e justificativa curta do modelo para apoiar auditoria humana."
+        "Consulte comentários classificados pelo modelo, com evidência textual, alvo identificado "
+        "e justificativa curta para apoiar auditoria humana."
     ),
 )
 
@@ -52,10 +52,10 @@ filter_col, search_col = st.columns([1.1, 1.9])
 
 with filter_col:
     selected_platform_labels = st.multiselect(
-        "Redes sociais",
+        "Plataformas",
         options=platform_labels,
         default=platform_labels,
-        placeholder="Selecione uma ou mais redes",
+        placeholder="Selecione uma ou mais plataformas",
     )
 
 with search_col:
@@ -65,7 +65,7 @@ with search_col:
     )
 
 if not selected_platform_labels:
-    st.warning("Selecione ao menos uma rede social para consultar os comentários.")
+    st.warning("Selecione ao menos uma plataforma para consultar os comentários.")
     st.stop()
 
 selected_platforms = [platform_label_to_key[label] for label in selected_platform_labels]
@@ -88,7 +88,7 @@ metric_grid(
 
 section_header(
     "Comentários classificados",
-    "Tabela paginada com conteúdo, classificação, tipos detectados e explicação do modelo.",
+    "Tabela paginada com conteúdo, classificação, tipos de preconceito detectados e explicação do modelo.",
 )
 page_size = st.selectbox("Comentários por página", [10, 25, 50, 100], index=1)
 total_pages = max(math.ceil(total_records / page_size), 1)
@@ -112,22 +112,22 @@ def format_types(value):
 
 
 table = comments_df.copy()
-table["hate_types_text"] = table["hate_types"].apply(format_types)
+table["hate_types_text"] = table["hate_types_label"].apply(format_types)
 table_display = table.rename(
     columns={
         "analysis_id": "ID análise",
         "platform_label": "Rede",
         "pred_label_label": "Classificação",
-        "hate_probability": "Probabilidade hate",
-        "hate_types_text": "Tipos",
-        "pred_category": "Categoria",
+        "hate_probability": "Probabilidade de discurso de ódio",
+        "hate_types_text": "Tipos de preconceito",
+        "pred_category_label": "Categoria de preconceito",
         "published_at": "Publicado em",
         "text_excerpt": "Comentário",
         "evidencia_textual": "Evidência",
         "justificativa_curta": "Justificativa",
     }
 )
-table_display["Probabilidade hate"] = table_display["Probabilidade hate"].apply(
+table_display["Probabilidade de discurso de ódio"] = table_display["Probabilidade de discurso de ódio"].apply(
     lambda value: format_pct(float(value or 0) * 100)
 )
 
@@ -137,9 +137,9 @@ st.dataframe(
             "ID análise",
             "Rede",
             "Classificação",
-            "Probabilidade hate",
-            "Tipos",
-            "Categoria",
+            "Probabilidade de discurso de ódio",
+            "Tipos de preconceito",
+            "Categoria de preconceito",
             "Publicado em",
             "Comentário",
             "Evidência",
@@ -151,8 +151,8 @@ st.dataframe(
 )
 
 section_header(
-    "Por que a LLM classificou assim?",
-    "Selecione um comentário da página atual para ler a evidência, a justificativa e o alvo apontados pelo Gemma.",
+    "Por que o modelo classificou assim?",
+    "Selecione um comentário da página atual para ler a evidência, a justificativa e o alvo apontados pelo modelo.",
 )
 options = {
     (
@@ -173,9 +173,9 @@ target_text = escape(str(row["alvo_identificado"] or "Nenhum alvo específico re
 metric_grid(
     [
         ("Classificação", row["pred_label_label"]),
-        ("Probabilidade hate", format_pct(float(row["hate_probability"] or 0) * 100)),
-        ("Categoria", row["pred_category"] or "sem categoria"),
-        ("Tipos", format_types(row["hate_types"]) or "sem tipo"),
+        ("Probabilidade de discurso de ódio", format_pct(float(row["hate_probability"] or 0) * 100)),
+        ("Categoria de preconceito", row["pred_category_label"] or "sem categoria"),
+        ("Tipos de preconceito", format_types(row["hate_types_label"]) or "sem tipo"),
     ]
 )
 
@@ -209,7 +209,7 @@ with left:
     st.markdown(
         f"""
 <div class="llm-card">
-<div class="llm-label">Justificativa curta da Gemma</div>
+<div class="llm-label">Justificativa curta do modelo</div>
 <div class="llm-text">{reason_text}</div>
 </div>
 """,
