@@ -1,0 +1,215 @@
+/* Cards, KPIs, badges, tabelas e gráficos. */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+.card:hover { box-shadow: var(--shadow); border-color: var(--border-strong); }
+.card-header {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 18px 20px 0;
+}
+.card-title { font-size: 15px; font-weight: 720; margin: 0; letter-spacing: -0.01em; color: var(--navy); }
+[data-theme="dark"] .card-title { color: var(--text); }
+.card-sub { margin: 5px 0 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; max-width: 78ch; }
+.card-body { padding: 16px 20px 20px; }
+
+.grid { display: grid; gap: 16px; }
+.grid-kpi { grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); }
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+
+.chart-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.chart-controls .btn { padding: 6px 10px; }
+.number-control {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--text-muted); font-size: 12px; font-weight: 650;
+}
+.number-control input {
+  width: 88px; padding: 6px 9px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface-2); color: var(--text);
+  font: inherit; font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- KPIs */
+
+.kpi {
+  position: relative;
+  padding: 18px 20px;
+  overflow: hidden;
+}
+.kpi-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.kpi-value {
+  font-size: clamp(23px, 2.5vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-top: 6px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.kpi-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.kpi-delta {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-top: 8px; padding: 2px 9px;
+  border-radius: 999px; font-size: 11.5px; font-weight: 680;
+}
+.kpi-delta.up { background: var(--danger-soft); color: var(--danger); }
+.kpi-delta.down { background: var(--ok-soft); color: var(--ok); }
+.kpi-delta.flat { background: var(--surface-3); color: var(--text-muted); }
+
+/* --------------------------------------------------------------- badges */
+
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 650;
+  background: var(--navy-soft); color: var(--navy);
+}
+.badge.muted { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+.badge.hate { background: var(--danger-soft); color: var(--danger); }
+.badge.ok { background: var(--navy-soft); color: var(--navy); }
+
+/* --------------------------------------------------------------- tabelas */
+
+.table-wrap {
+  overflow: auto;
+  max-height: 560px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th, table.data td {
+  padding: 10px 13px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table.data th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface-2);
+  font-size: 10.5px; font-weight: 720; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-muted);
+  white-space: nowrap;
+}
+table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.data tbody tr:nth-child(even) { background: var(--surface-2); }
+table.data tbody tr:hover { background: var(--accent-soft); }
+table.data tbody tr:last-child td { border-bottom: none; }
+.cell-text { max-width: 460px; }
+
+.pager { display: flex; align-items: center; gap: 10px; padding-top: 14px; flex-wrap: wrap; }
+.pager span { color: var(--text-muted); font-size: 12.5px; }
+
+/* -------------------------------------------------------------- estados */
+
+.chart { width: 100%; }
+.chart-error {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+.empty {
+  padding: 32px 22px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.loading { padding: 20px 0; }
+
+.skeleton { display: flex; flex-direction: column; gap: 10px; padding: 8px 0; }
+.skeleton-row {
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--surface-2) 37%, var(--surface-3) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+.skeleton-row.bar { height: 220px; border-radius: var(--radius-sm); }
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+.list-inline { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* --------------------------------------------------------- nuvem de palavras */
+
+.wordcloud {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background:
+    radial-gradient(520px 260px at 50% 40%, var(--accent-soft) 0%, rgba(255, 255, 255, 0) 70%);
+}
+
+.wc-word {
+  position: absolute;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+  letter-spacing: -0.015em;
+  transition: filter 0.18s ease, opacity 0.18s ease;
+}
+.wc-word:hover { filter: brightness(1.18) saturate(1.15); }
+
+/* Tons mudam com o tema para manter contraste em fundo claro e escuro. */
+.wc-t0 { color: var(--wc-0); }
+.wc-t1 { color: var(--wc-1); }
+.wc-t2 { color: var(--wc-2); }
+.wc-t3 { color: var(--wc-3); }
+.wc-t4 { color: var(--wc-4); }
+.wc-t5 { color: var(--wc-5); }
+
+/* Aviso de versão nova: a SPA em produção não se recarrega sozinha quando o
+   dist/ é republicado, então a própria página avisa e oferece o reload. */
+.update-banner {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 36px);
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: var(--shadow-lg);
+}
+.update-banner .update-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.update-banner button {
+  flex: none;
+  padding: 6px 13px;
+  border: none;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+}
+.update-banner button:hover {
+  background: var(--accent-2);
+}
